@@ -22,6 +22,19 @@ on:
     - test-please/*
   workflow_dispatch:
     inputs:
+      leg:
+        description: "baseline (uninstrumented) or instrumented (under chalk/curiosity)"
+        type: choice
+        options: [instrumented, baseline]
+        default: instrumented
+      profile:
+        description: "CrashOverride chalk profile"
+        type: string
+        default: curiosity-tests-racecar
+      racecar_run:
+        description: "racecar correlation token, echoed into the run name"
+        type: string
+        default: ""
       coverage:
         description: 'Coverage enabled'
         required: false
@@ -30,13 +43,22 @@ on:
 
 # cancel previous runs if new commits are pushed to the PR, but run for each commit on master
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
+  cancel-in-progress: false
 
 env:
+  # The one variable that separates the arms: on baseline, action-checkout
+  # skips its Set up Chalk step entirely.
+  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
   BUILD_ROOT: ${{ github.workspace }}/bazel-bin/build
   KONG_TEST_COVERAGE: ${{ inputs.coverage == true || github.event_name == 'schedule' }}
   RUNNER_COUNT: 7
+
+permissions:
+  contents: read
+  id-token: write
+
+run-name: "Build & Test ${{ inputs.leg || 'push' }} ${{ inputs.racecar_run }}"
 
 jobs:
   metadata:
@@ -46,9 +68,19 @@ jobs:
       old-kong-version: ${{ steps.old-kong-version.outputs.ref }}
 
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - name: Checkout code
+      uses: crashappsec/action-checkout@main
       with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
         fetch-depth: 0  # `git merge-base` requires the history
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
     - name: Get Old Kong Version
       id: old-kong-version
@@ -75,6 +107,9 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     with:
+      chalk_on: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+      profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+      racecar_run: ${{ inputs.racecar_run }}
       relative-build-root: bazel-bin/build
 
   lint-and-doc-tests:
@@ -91,7 +126,17 @@ jobs:
           sudo echo "$(whoami) hard nofile 65536" | sudo tee -a /etc/security/limits.d/kong-ci.conf
 
     - name: Checkout Kong source code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
     - name: Lookup build cache
       id: cache-deps
@@ -139,7 +184,17 @@ jobs:
 
     steps:
     - name: Checkout source code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
     - name: Download runtimes file
       uses: Kong/gh-storage/download@29d5de7b2b87c63016daae5680aefab30812a318 # main (node24)
@@ -232,9 +287,20 @@ jobs:
           sudo echo "$(whoami) hard nofile 65536" | sudo tee -a /etc/security/limits.d/kong-ci.conf
 
     - name: Checkout Kong source code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: crashappsec/action-checkout@main
 
     # used for plugin compatibility test
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+
     - name: Checkout old version Kong source code
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
@@ -409,7 +475,17 @@ jobs:
           sudo echo "$(whoami) hard nofile 65536" | sudo tee -a /etc/security/limits.d/kong-ci.conf
 
     - name: Checkout Kong source code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
     - name: Lookup build cache
       id: cache-deps
@@ -474,7 +550,17 @@ jobs:
 
     steps:
     - name: Checkout source code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+    - name: Assert instrumentation is live
+      if: env.CHALK_ON == 'true'
+      run: |
+        test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
+        test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
 
     - name: Install requirements
       run: |
