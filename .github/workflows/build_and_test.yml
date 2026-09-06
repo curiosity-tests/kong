@@ -49,9 +49,9 @@ concurrency:
 env:
   # The one variable that separates the arms: on baseline, action-checkout
   # skips its Set up Chalk step entirely.
-  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+  CHALK_ON: ${{ inputs.leg == 'instrumented' }}
   BUILD_ROOT: ${{ github.workspace }}/bazel-bin/build
-  KONG_TEST_COVERAGE: ${{ inputs.coverage == true || github.event_name == 'schedule' }}
+  KONG_TEST_COVERAGE: ${{ inputs.coverage == true || 'push' == 'schedule' }}
   RUNNER_COUNT: 7
 
 permissions:
@@ -107,7 +107,7 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     with:
-      chalk_on: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+      chalk_on: ${{ inputs.leg == 'instrumented' }}
       profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
       racecar_run: ${{ inputs.racecar_run }}
       relative-build-root: bazel-bin/build
@@ -449,7 +449,7 @@ jobs:
 
     - name: Archive coverage stats file
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-      if: ${{ always() && (inputs.coverage == true || github.event_name == 'schedule') }}
+      if: ${{ always() && (inputs.coverage == true || 'push' == 'schedule') }}
       with:
         name: luacov-stats-out-${{ github.job }}-${{ github.run_id }}-${{ matrix.runner }}
         retention-days: 1
@@ -530,7 +530,7 @@ jobs:
 
     - name: Archive coverage stats file
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-      if: ${{ always() && (inputs.coverage == true || github.event_name == 'schedule') }}
+      if: ${{ always() && (inputs.coverage == true || 'push' == 'schedule') }}
       with:
         name: luacov-stats-out-${{ github.job }}-${{ github.run_id }}
         retention-days: 1
@@ -545,7 +545,7 @@ jobs:
   cleanup-and-aggregate-stats:
     needs: [lint-and-doc-tests,pdk-tests,busted-tests]
     name: Cleanup and Luacov stats aggregator
-    if: ${{ always() && (inputs.coverage == true || github.event_name == 'schedule') }}
+    if: ${{ always() && (inputs.coverage == true || 'push' == 'schedule') }}
     runs-on: ubuntu-22.04
 
     steps:
